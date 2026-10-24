@@ -355,7 +355,10 @@ $('#save').onclick=()=>{localStorage.setItem('ig-mod-key',keyEl.value.trim());sa
 const say=(t,cls)=>{const m=$('#msg');m.textContent=t;m.className=cls||'';};
 const hdr=()=>({'x-mod-key':keyEl.value.trim()});
 const esc=(s)=>String(s??'').replace(/[&<>"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-async function api(name,body){const r=await fetch('/mod/api/'+name,{method:body===undefined?'GET':'POST',headers:body===undefined?{}:{...hdr(),'content-type':body instanceof Blob?'application/zip':'application/json'},body});const t=await r.text();if(!r.ok)throw new Error(t||('HTTP '+r.status));return t?JSON.parse(t):{};}
+// Relative to the page, so the manager works both at the root and under a reverse proxy's sub-path (站点-1: the
+// platform asks for nothing outside its own prefix).
+const apiBase=(location.pathname.endsWith('/')?location.pathname:location.pathname+'/')+'api/';
+async function api(name,body){const r=await fetch(apiBase+name,{method:body===undefined?'GET':'POST',headers:body===undefined?{}:{...hdr(),'content-type':body instanceof Blob?'application/zip':'application/json'},body});const t=await r.text();if(!r.ok)throw new Error(t||('HTTP '+r.status));return t?JSON.parse(t):{};}
 async function toggle(id,enabled){try{const r=await api('toggle',JSON.stringify({id,enabled}));say((enabled?'已启用 ':'已停用 ')+id+'（现 '+r.mods+' 个）','ok');await refresh();}catch(e){say(e.message,'bad');}}
 async function refresh(){
  try{const d=await api('list.json');
