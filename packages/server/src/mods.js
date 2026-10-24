@@ -17,7 +17,7 @@ const JSON_TYPE = 'application/json; charset=utf-8';
 /**
  * The host's mods: the content source the battles use, the list the pages read, the files by their path on the site,
  * and the log's lines.
- * @typedef {{ source: import('@aue/content').ContentSource, index: import('@aue/content').ModIndex, files: Map<string, Buffer>, lines: string[] }} HostMods
+ * @typedef {{ source: import('@aue/content').ContentSource, index: import('@aue/content').ModIndex, files: Map<string, Buffer>, lines: string[], reports?: readonly import('@aue/content').ModReport[], skipped?: { id: string, problems: string[] }[] }} HostMods
  */
 
 /** No mods: the official content and an empty list. @type {HostMods} */
@@ -52,20 +52,26 @@ export async function loadHostMods(dir) {
     ...source.reports.flatMap(reportLines), ...source.conflicts.map((c) => `mod conflict: ${c}`),
     `mods: ${index.mods.length ? index.mods.map((m) => `${m.id} ${m.version}`).join(', ') : 'none'}${dir ? ` (${dir})` : ''}`,
   ];
-  return { source, index, files, lines };
+  // reports / skipped are for the mod manager's page (what loaded, what did not and why); the wire keeps only `index`.
+  return { source, index, files, lines, reports: source.reports, skipped };
 }
 
 /**
  * The /mods/ handler (站点-7): the list, and the files it names; anything else under /mods/ is 404.
- * @param {HostMods} mods @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => boolean}
+ * `mods` may be a function (the mod manager swaps the whole set on reload): every request reads the current set.
+ * @param {HostMods | (() => HostMods)} mods
+ * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => boolean}
  */
 export function createModsHandler(mods) {
-  const list = Buffer.from(JSON.stringify(mods.index), 'utf8');
+  // `mods` may be a function: the mod manager swaps the whole set on reload, and every request reads the current one
+  // (the list and the files are small; serializing the index per request keeps a reload from needing a new handler).
+  const current = () => (typeof mods === 'function' ? mods() : mods);
   return (req, res) => {
     const path = rawPathname(req.url);
     if (!path.startsWith(MODS_PREFIX)) return false;
     if (!allowReadOnly(req, res)) return true;
-    const body = path === `${MODS_PREFIX}index.json` ? list : mods.files.get(path);
+    const now = current();
+    const body = path === `${MODS_PREFIX}index.json` ? Buffer.from(JSON.stringify(now.index), 'utf8') : now.files.get(path);
     if (body) sendBody(req, res, { body, type: JSON_TYPE });
     else sendText(res, 404, 'not found');
     return true;
