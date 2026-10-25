@@ -1,0 +1,162 @@
+diff --git a/packages/net/src/host.js b/packages/net/src/host.js
+index c13ba16..bae298b 100644
+--- a/packages/net/src/host.js
++++ b/packages/net/src/host.js
+@@ -2,7 +2,7 @@
+ // arbiter's own simulation, desync recovery, the speed and pause controls, the seats' signals. Transport-agnostic: messages come in through the
+ // methods (already validated with clientMessageProblem) and go out through `send`.
+ import { PROTOCOL_VERSION } from '@aue/schema';
+-import { createWorld, step, stateHash, takeSnapshot, contentHash } from '@aue/sim';
++import { createWorld, step, stateHash, takeSnapshot, contentHash, coop } from '@aue/sim';
+ import { MAX_AHEAD, HASH_HISTORY, HASH_EVERY, framesAt, PAUSE_ASK_MS, RESUME_MS, SIGNAL_RATE } from './constants.js';
+ 
+ /** @typedef {import('@aue/schema').Command} Command @typedef {import('@aue/schema').ServerMessage} ServerMessage */
+@@ -211,10 +211,15 @@ export class LockstepHost {
+   frameCommands(f) {
+     const list = this.pending.get(f) ?? [];
+     this.pending.delete(f);
+-    if (this.o.seats !== 2) return list;
+-    for (const seat of [0, 1]) {
+-      const mate = 1 - seat, asking = this.world.players[mate].ask >= 0 || list.some(([s, c]) => s === mate && c.type === 'ask');
+-      if (!this.connected.has(seat) && asking) list.push([seat, { type: 'answer', accept: 1 }]);
++    // 合作-5：向已离开的伙伴发起的请求自动被同意。伙伴关系见 coop.js 的 partnerOf —— 两个座位时是彼此，
++    // 更多座位时是同侧的一对（0↔2、1↔3），所以按座位数遍历，而不是写死 [0, 1]。
++    const players = this.world.players.length;
++    for (let seat = 0; seat < players; seat++) {
++      if (this.connected.has(seat)) continue;
++      const partner = coop.partnerOf(seat, players);
++      if (partner < 0) continue;
++      const asking = this.world.players[partner].ask >= 0 || list.some(([s, c]) => s === partner && c.type === 'ask');
++      if (asking) list.push([seat, { type: 'answer', accept: 1 }]);
+     }
+     return list;
+   }
+diff --git a/packages/render/src/renderer.js b/packages/render/src/renderer.js
+index 4f662ae..7548a0c 100644
+--- a/packages/render/src/renderer.js
++++ b/packages/render/src/renderer.js
+@@ -17,6 +17,42 @@ import { createOverlays } from './overlays.js';
+ import { createPlacing } from './placing.js';
+ import { spineModel } from './spine.js';
+ 
++/** The colour the far terrain fades into; matches the backdrop's lower half so the map edge has no seam. */
++export const SKY_FOG_COLOR = 0x232a30;
++/** Fog starts past the battlefield proper (a 12×9 map sits within ~20 units of the camera) and ends beyond the
++ *  largest one (the 26×16 fortress), so nothing the player reads is tinted — only the map's outer edge fades. */
++export const SKY_FOG_NEAR = 26, SKY_FOG_FAR = 58;
++
++/**
++ * The battle backdrop: a plain vertical gradient, drawn into a 2×N canvas — no asset, no skybox. It replaces the flat
++ * grey the scene used to be washed with; the fog above blends the terrain into its lower half.
++ * @returns {THREE.Texture | null} null where there is no 2D canvas (a headless run without a DOM)
++ */
++function skyBackdrop() {
++  const doc = globalThis.document;
++  if (typeof doc?.createElement !== 'function') return null;
++  const canvas = doc.createElement('canvas');
++  canvas.width = 2; canvas.height = 256;
++  const g = canvas.getContext('2d');
++  if (!g) return null;
++  const grad = g.createLinearGradient(0, 0, 0, 256);
++  grad.addColorStop(0, '#0a0d10');
++  grad.addColorStop(0.55, '#161b1f');
++  grad.addColorStop(1, '#232a30');
++  g.fillStyle = grad;
++  g.fillRect(0, 0, 2, 256);
++  const texture = new THREE.CanvasTexture(canvas);
++  texture.colorSpace = THREE.SRGBColorSpace;
++  return texture;
++}
++
++/** Gives the scene its backdrop and the fog that blends the far terrain into it — nothing exists beyond the
++ *  battlefield, so a flat colour used to cut the map's edge into a plate. @param {THREE.Scene} scene */
++function applySky(scene) {
++  scene.background = skyBackdrop() ?? new THREE.Color(SKY_FOG_COLOR);
++  scene.fog = new THREE.Fog(SKY_FOG_COLOR, SKY_FOG_NEAR, SKY_FOG_FAR);
++}
++
+ /**
+  * @typedef {object} RendererOptions
+  * @property {HTMLCanvasElement} canvas
+@@ -93,7 +129,7 @@ export function createBattleRenderer(o) {
+   // the counts cover a whole frame (the scene and the overlays), reset at its start
+   renderer.info.autoReset = false;
+   const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera();
+-  scene.background = new THREE.Color(0x404040);
++  applySky(scene);
+   const highlight = createHighlight(o.level), patch = highlight.patch;
+   const terrain = o.kit ? createKitTerrain(o.level, o.kit, terrainTextures(o), patch) : createTerrain(o.level, o.textures, patch);
+   const units = createUnits(o.textures, o.models, o.foeDevices, o.deviceMeshes, o.flyers), field = { ...o.level, highland: o.kit?.kit.highland };
+diff --git a/packages/sim/src/coop.js b/packages/sim/src/coop.js
+index 038ca0e..8f96737 100644
+--- a/packages/sim/src/coop.js
++++ b/packages/sim/src/coop.js
+@@ -16,20 +16,39 @@ export const REVIVE_FRAMES = secondsToFrames(30);
+ /**
+  * The seats a goal tile belongs to (合作-1): side A to seat 0, side B to seat 1, a shared goal to every seat. A goal
+  * without a side: with one player that player's; with two, the left half of the map to seat 0, the right to seat 1.
++ *
++ * With more than two seats a side is held by a pair, and both of them lose the life (合作-1 read as "a side belongs to
++ * whoever stands on it"): A to seats 0/2, B to seats 1/3, the two halves of an unsided goal likewise. Two seats or
++ * fewer keep the original one-seat-per-side answer, so an existing match behaves exactly as before.
+  * @param {Content} c @param {number} players @param {Cell} end @returns {number[]}
+  */
+ export function goalSeats(c, players, end) {
+   const side = tileAt(c.level, end.row, end.col)?.goal ?? '';
+   if (players === 1) return [0];
+   if (side === 'Shared') return Array.from({ length: players }, (_, i) => i);
+-  if (side === 'A') return [0];
+-  if (side === 'B') return [1];
+-  return [end.col * 2 >= c.level.width ? 1 : 0];
++  /** The seats that hold one side: seat `i` alone with two or fewer, else every seat on that parity. @param {number} i */
++  const holders = (i) => (players <= 2 ? [i] : Array.from({ length: players }, (_, s) => s).filter((s) => s % 2 === i));
++  if (side === 'A') return holders(0);
++  if (side === 'B') return holders(1);
++  return holders(end.col * 2 >= c.level.width ? 1 : 0);
+ }
+ 
+ /** Whether a player is down (合作-4). @param {Player} p */
+ export const isDown = (p) => p.revive >= 0;
+ 
++/**
++ * A seat's partner for the cost request (合作-5): the other seat on the same side. Two seats swap with each other,
++ * exactly as before; with more, the two seats that hold one goal side (see `goalSeats`) pair up — 0↔2, 1↔3 — so a
++ * request never crosses to the opposite side. -1 when the seat has no partner (a lone player, or an odd seat out).
++ * @param {number} seat @param {number} players
++ */
++export function partnerOf(seat, players) {
++  if (players === 2) return 1 - seat;
++  if (players <= 1) return -1;
++  for (let s = 0; s < players; s++) if (s !== seat && s % 2 === seat % 2) return s;
++  return -1;
++}
++
+ /**
+  * A player loses lives (合作-2…合作-4): their life drops, at least 0; at 0 they go down.
+  * @param {World} w @param {number} seat @param {number} n
+@@ -135,7 +154,7 @@ export const DEFAULT_COST_TRANSFER = 15;
+  * @param {World} w @param {Content} c @param {number} seat @returns {string | null}
+  */
+ export function askProblem(w, c, seat) {
+-  const p = w.players[seat], mate = w.players.length === 2 ? w.players[1 - seat] : null;
++  const partner = partnerOf(seat, w.players.length), p = w.players[seat], mate = partner < 0 ? null : w.players[partner];
+   if (!p || !mate) return 'no mate';
+   if (isDown(p)) return 'player down';
+   if (p.cost >= c.level.options.maxCost) return 'cost full';
+@@ -160,14 +179,14 @@ export function askCost(w, c, seat) {
+  * @param {World} w @param {Content} c @param {number} seat the answering player @param {boolean} accept
+  */
+ export function answerCost(w, c, seat, accept) {
+-  const mate = w.players[seat], asker = w.players.length === 2 ? w.players[1 - seat] : null;
++  const partner = partnerOf(seat, w.players.length), mate = w.players[seat], asker = partner < 0 ? null : w.players[partner];
+   if (!mate || !asker || asker.ask < 0) return;
+   asker.ask = -1;
+   const room = Math.max(0, c.level.options.maxCost - asker.cost);
+   const amount = accept ? Math.max(0, Math.min(c.level.options.costTransfer ?? DEFAULT_COST_TRANSFER, mate.cost, room)) : 0;
+   mate.cost -= amount;
+   asker.cost += amount;
+-  w.events.push({ type: 'answer', owner: 1 - seat, accept: accept ? 1 : 0, amount });
++  w.events.push({ type: 'answer', owner: partner, accept: accept ? 1 : 0, amount });
+ }
+ 
+ /**

@@ -99,11 +99,27 @@ async function deviceMeshes(content) {
   return loadDeviceMeshes(await res.json(), ASSETS.href, Object.keys(content.devices ?? {}));
 }
 
+/**
+ * Levels the shipped `kits/index.json` does not map, and the theme that fits each. The assets carry 13 tile kits
+ * but the index only points six levels at one of them; every other level fell back to flat unlit 128×128 tiles
+ * (渲染-7's `createTerrain`). The kits below are already in the same assets package, so this is a mapping, not new art.
+ *
+ * The assets' own mapping wins (`...index.levels` last): if a later assets release covers these levels itself,
+ * that choice replaces this table.
+ */
+const KIT_BY_LEVEL = Object.freeze({
+  act1multi_tr01: 'map_training',
+  act1multi_fortress_rm01: 'map_lungmen',
+  'act1multi_fortress_hard-01': 'map_chernobog_b',
+});
+
 /** The map theme's tile kit a level uses (the engine's 渲染-7), or null when the assets have no kit index. @param {string} level */
 async function tileKit(level) {
   const res = await fetch(new URL('kits/index.json', ASSETS)).catch(() => null);
   if (!res?.ok) return null;
-  return loadTileKit(await res.json(), new URL('kits/', ASSETS).href, level);
+  const index = await res.json();
+  const levels = { ...KIT_BY_LEVEL, ...(index.levels ?? {}) };
+  return loadTileKit({ ...index, levels }, new URL('kits/', ASSETS).href, level);
 }
 
 /** Each deck operator's skill (1-based) by its character, for its skill's own effects (the engine's 渲染-11). @param {import('@aue/schema').Match} match */

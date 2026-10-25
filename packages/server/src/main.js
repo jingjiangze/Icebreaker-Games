@@ -15,6 +15,7 @@ import { startHttpServer } from './http.js';
 import { createMatchRoom } from './battle.js';
 import { createBattles } from './battles.js';
 import { createLobby } from './lobby.js';
+import { SEATS_MAX } from './rooms.js';
 import { projectViews, recruits } from './catalog.js';
 import { kitDir, nodeKits } from './kits.js';
 import { createGuard, guardUpgrades, countOption, LIMITS } from './guard.js';
@@ -58,7 +59,9 @@ if (file) {
   if (node) console.log(`node ${node.digit} of ${Object.keys(node.peers).length}: room codes begin with ${node.digit}`);
   const lobby = createLobby({ projects: projectViews(), recruits: await recruits(), startMatch: (m, keys) => battles.start(m, keys), log, guard, trustProxy, node,
     startTraining: (m, key) => battles.start(m, [key], { absent: [1] }),
-    maxRooms: countOption(args, '--max-rooms', LIMITS.rooms) });
+    maxRooms: countOption(args, '--max-rooms', LIMITS.rooms),
+    // 房间座位数：默认 2（上游的合作人数），`--seats 4` 开四人房。上限见 rooms.js 的 SEATS_MAX。
+    seats: Math.max(1, Math.min(SEATS_MAX, countOption(args, '--seats', 2))) });
   onUpgrade = (req, socket, head) => { if (!lobby.upgrade(req, socket, head) && !battles.upgrade(req, socket, head)) socket.destroy(); };
 }
 const server = await startHttpServer({ rootDir, port: parsePort(args), host: option(args, '--host') ?? '127.0.0.1', onUpgrade: guardUpgrades(guard, trustProxy, onUpgrade), kitsDir, home: file ? 'play' : 'room', mods, modManager });

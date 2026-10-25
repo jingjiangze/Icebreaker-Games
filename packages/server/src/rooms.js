@@ -12,6 +12,12 @@ import { newCode, elsewhere } from './nodes.js';
  */
 export const TIMES = Object.freeze({ room: 15 * 60_000, ...STEP_MS, together: 60_000 });
 
+/**
+ * The most seats one room takes (房间-1). 上游的合作是两人；这个 fork 支持到四人 —— 每人一份阵容，
+ * 关卡的一侧由两个座位共守（见 engine 的 coop.goalSeats）。
+ */
+export const SEATS_MAX = 4;
+
 /** @typedef {import('@icebreaker/mode-regular').Squad} Squad @typedef {import('@icebreaker/mode-regular').BoxEntry} BoxEntry */
 /** @typedef {import('./allocation.js').Picking} Picking @typedef {import('./allocation.js').Coordination} Coordination */
 /** @typedef {{ level: string, difficulty: 'NORMAL' | 'FOUR_STAR' }} Project */
@@ -30,7 +36,8 @@ export const TIMES = Object.freeze({ room: 15 * 60_000, ...STEP_MS, together: 60
  * @property {'setup' | 'confirm' | 'pick' | 'lineup' | 'battle' | 'together'} phase `together`: after a matched match (房间-10)
  * @property {number} project the project's index
  * @property {boolean} inverse 互选模式 (房间-8): the seats swap their lineups and styles when the match starts
- * @property {boolean} prepared the guest's 准备参赛
+ * @property {boolean} prepared every seat but the host has 准备参赛 (with two seats that is the one guest)
+ * @property {Set<number>} [preparedSeats] the seats that did — the host never counts
  * @property {number} expires @property {number} due the current step's end (0: none)
  * @property {(Squad | null)[]} squads @property {string[]} styles each seat's play style (房间-3) @property {Coordination | null} coord
  * @property {Options[]} options @property {(Pick[] | null)[]} lineups @property {boolean[]} ready
@@ -47,6 +54,8 @@ export const TIMES = Object.freeze({ room: 15 * 60_000, ...STEP_MS, together: 60
  * @property {(match: import('@aue/schema').Match, keys: string[]) => Promise<string> | string} startMatch the match's id
  * @property {Project[]} projects @property {BoxEntry[]} recruits the temporary recruits (房间-5)
  * @property {number} [maxRooms] how many rooms the server holds at most (站点-2); none: no limit
+ * @property {number} [seats] how many seats a room takes (房间-1): 2 by default — 上游的合作人数 — up to SEATS_MAX;
+ *   the server's `--seats 4` opens four-seat rooms
  * @property {(session: number) => void} [wrongCode] a session tried a room code no room has (站点-2)
  * @property {import('./nodes.js').Node | null} [node] this server as one node of several (站点-6): its rooms' codes begin with its digit
  */
@@ -81,16 +90,18 @@ function view(L, r, seat) {
     lineups: r.lineups.map((l) => (l ? l.map((x) => x.id) : null)), ready: r.ready,
     // each seat's skill and module for its lineup's operators, in their order (房间-6: both lineups shown in full)
     choices: r.lineups.map((l) => (l ? l.map((x) => ({ skill: x.skill, module: x.module })) : null)),
-    likes: r.likes ?? [false, false],
+    likes: r.likes ?? r.members.map(() => false),
     matched: !!r.matched, together: r.together ?? null,
   };
 }
 /** @param {Lobby} L @param {Room} r */
 const push = (L, r) => r.members.forEach((m, i) => { if (m.online) L.o.send(m.id, view(L, r, i)); });
 
-/** Back to 项目调整 with nothing of the allocation left (房间-2, 房间-6). @param {Room} r */
+/** Back to 项目调整 with nothing of the allocation left (房间-2, 房间-6). Every per-seat list has one entry per seat of
+ *  the room as it stands now (two at the least), so a four-seat room keeps four. @param {Room} r */
 function toSetup(r) {
-  Object.assign(r, { phase: 'setup', prepared: false, due: 0, squads: [null, null], styles: ['', ''], coord: null, options: [], lineups: [null, null], ready: [false, false], match: null });
+  const n = Math.max(2, Math.min(SEATS_MAX, r.members.length)), fill = (/** @type {any} */ v) => Array.from({ length: n }, () => v);
+  Object.assign(r, { phase: 'setup', prepared: false, preparedSeats: new Set(), due: 0, squads: fill(null), styles: fill(''), coord: null, options: [], lineups: fill(null), ready: fill(false), match: null });
 }
 
 /** @param {Lobby} L @param {Room} r @param {string} why */
@@ -127,11 +138,13 @@ function join(L, id, text) {
   if (host) { L.o.send(id, { t: 'elsewhere', code, host }); return; }
   if (!r) { L.o.wrongCode?.(id); fail(L, id, '没有这个房间编号'); return; }
   if (s.room === r.code) { push(L, r); return; }
-  if (r.members.length >= 2) { fail(L, id, '房间已满'); return; }
+  if (r.members.length >= (L.o.seats ?? 2)) { fail(L, id, '房间已满'); return; }
   if (r.phase !== 'setup') { fail(L, id, '房间已经开始分配干员'); return; }
   if (s.room) leave(L, id);
   r.members.push({ id, key: s.key, name: s.name, online: true, profile: s.profile });
   s.room = r.code;
+  // 人数变了，每个座位一份的列表要跟着变长（座位号 = members 下标，所以重建后仍然对齐）。
+  toSetup(r);
   push(L, r);
 }
 
@@ -153,7 +166,7 @@ function leave(L, id) {
 /** 项目确认 (房间-2): the host goes on once the guest prepared. @param {Lobby} L @param {Room} r @param {number} id */
 function go(L, r, id) {
   if (seatOf(r, id) !== 0 || r.phase !== 'setup' || r.members.length < 2 || !r.prepared) return;
-  Object.assign(r, { phase: 'confirm', due: L.o.now() + TIMES.confirm, squads: [null, null] });
+  Object.assign(r, { phase: 'confirm', due: L.o.now() + TIMES.confirm, squads: r.members.map(() => null) });
   push(L, r);
 }
 
@@ -173,8 +186,9 @@ function confirm(L, r, id, squad, style) {
 
 /** Both seats confirmed: the coordination, or straight the lineups (房间-4). @param {Lobby} L @param {Room} r */
 function allocate(L, r) {
-  if (!r.squads[0] || !r.squads[1]) return;
-  r.coord = coordinate(/** @type {[Squad, Squad]} */ (r.squads), L.o.random);
+  // 每个座位都要确认过（四人间就是四份），不是只看前两个。
+  if (r.squads.slice(0, r.members.length).some((s) => !s)) return;
+  r.coord = coordinate(/** @type {Squad[]} */ (r.squads), L.o.random);
   if (r.coord.picking) Object.assign(r, { phase: 'pick', due: L.o.now() + TIMES.pick });
   else startLineups(L, r);
 }
@@ -208,9 +222,9 @@ function together(L, r, id) {
 
 /** 组建上场阵容 (房间-5): each seat's kept, drawn and extra operators. @param {Lobby} L @param {Room} r */
 function startLineups(L, r) {
-  const c = /** @type {Coordination} */ (r.coord), won = c.picking?.won ?? [[], []];
-  r.options = [0, 1].map((seat) => ({ kept: [...c.kept[seat], ...won[seat]], ...offer(c.pools[seat], L.recruitIds, L.o.random) }));
-  Object.assign(r, { phase: 'lineup', due: L.o.now() + TIMES.lineup, lineups: [null, null], ready: [false, false] });
+  const c = /** @type {Coordination} */ (r.coord), won = c.picking?.won ?? [];
+  r.options = r.members.map((_, seat) => ({ kept: [...(c.kept[seat] ?? []), ...(won[seat] ?? [])], ...offer(c.pools[seat] ?? [], L.recruitIds, L.o.random) }));
+  Object.assign(r, { phase: 'lineup', due: L.o.now() + TIMES.lineup, lineups: r.members.map(() => null), ready: r.members.map(() => false) });
 }
 
 /** A pick or a handing over that was allowed (allocation.js: null when not); none left: the lineups (房间-4). @param {Lobby} L @param {Room} r @param {Picking | null} next */
@@ -222,10 +236,24 @@ function afterPick(L, r, next) {
   push(L, r);
 }
 
-/** A box entry of the seat's squad or a temporary recruit. @param {Lobby} L @param {Room} r @param {number} seat @param {unknown} id */
+/**
+ * A box entry by id: the seat's own squad first, then any other seat's, then a temporary recruit.
+ *
+ * With two seats every entry a seat may field comes from its own squad, so the second step never mattered. A contested
+ * operator belongs to whoever holds it high — with four seats one operator can sit in three squads' high lists and be
+ * picked by a seat that never had it — so the search has to cover the room, not just the seat.
+ * @param {Lobby} L @param {Room} r @param {number} seat @param {unknown} id
+ */
 function entryOf(L, r, seat, id) {
-  const s = /** @type {Squad} */ (r.squads[seat]);
-  return [...s.high, ...s.low, ...L.o.recruits].find((e) => e.id === id) ?? null;
+  const own = /** @type {Squad} */ (r.squads[seat]);
+  const ownHit = [...own.high, ...own.low].find((e) => e.id === id);
+  if (ownHit) return ownHit;
+  for (const s of r.squads) {
+    if (!s || s === own) continue;
+    const hit = [...s.high, ...s.low].find((e) => e.id === id);
+    if (hit) return hit;
+  }
+  return L.o.recruits.find((e) => e.id === id) ?? null;
 }
 
 /** Why one operator of a lineup may not field as chosen, or null (房间-5). @param {BoxEntry | null} e @param {Set<string>} allowed @param {any} x */
@@ -264,7 +292,8 @@ function setReady(L, r, id, on) {
   const seat = seatOf(r, id);
   if (r.phase !== 'lineup' || !r.lineups[seat]) return;
   r.ready[seat] = on;
-  if (r.ready[0] && r.ready[1]) void start(L, r);
+  // 每个座位都就绪才开赛（四人间是四份）。
+  if (r.ready.slice(0, r.members.length).every(Boolean)) void start(L, r);
   else push(L, r);
 }
 
@@ -346,7 +375,15 @@ const IN_ROOM = {
     Object.assign(r, { project: m.index, prepared: false });
     push(L, r);
   },
-  prepare: (L, r, id, m) => { if (seatOf(r, id) === 1 && r.phase === 'setup') { r.prepared = m.on; push(L, r); } },
+  prepare: (L, r, id, m) => {
+    // 任何非房主都可以准备（不只座位 1）；房主「项目确认」要求所有非房主都准备好了。
+    const seat = seatOf(r, id);
+    if (seat <= 0 || r.phase !== 'setup') return;
+    const seats = /** @type {Set<number>} */ (r.preparedSeats ??= new Set());
+    if (m.on) seats.add(seat); else seats.delete(seat);
+    r.prepared = r.members.every((x, i) => i === 0 || seats.has(i) || !x.online);
+    push(L, r);
+  },
   // 互选模式 (房间-8): the host turns it on or off at 项目调整; a change undoes the guest's 准备参赛
   inverse: (L, r, id, m) => {
     if (seatOf(r, id) !== 0 || r.phase !== 'setup' || r.inverse === m.on) return;
@@ -415,8 +452,8 @@ function ended(L, match) {
   if (!r) return;
   toSetup(r);
   r.expires = L.o.now() + TIMES.room;
-  r.likes = [false, false];
-  if (r.matched) Object.assign(r, { phase: 'together', together: [false, false], due: L.o.now() + TIMES.together });
+  r.likes = r.members.map(() => false);
+  if (r.matched) Object.assign(r, { phase: 'together', together: r.members.map(() => false), due: L.o.now() + TIMES.together });
   push(L, r);
 }
 
