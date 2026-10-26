@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { KIND, SKILL_STATE, STATUS_BIT } from '@aue/schema';
-import { deckCards, battleSpeed, hudState, menuSkill, ownUnitAt, requestsAfter, taskOf, costInput, unitBars, stageStartOf, fortressOf } from '../src/battlehud.js';
+import { deckCards, battleSpeed, hudState, menuSkill, ownUnitAt, requestsAfter, taskOf, costInput, unitBars, stageStartOf, fortressOf, partnerOf, seatOrder } from '../src/battlehud.js';
 
 /** A view unit. @param {Record<string, number>} v @returns {import('@aue/schema').ViewUnit} */
 const unit = (v) => ({ id: 1, kind: KIND.OPERATOR, owner: 0, x: 2, y: 3, z: 0, dir: 0, hp: 10, maxHp: 10, anim: 0, sp: 5, spCost: 20, skill: SKILL_STATE.CHARGING, skillLeft: -1, status: 0, element: 0, ep: 1, burst: 0, ...v });
@@ -40,11 +40,35 @@ test('the HUD\'s state of a frame: the deck, the cost and its next point, lives,
   const s = hudState({ view, status, control: { fast: [1, 0], held: 1, asker: -1, resuming: 0 }, seat: 0, options: { costIncreaseTime: 1, maxCost: 99 }, selected: 'b' });
   assert.deepEqual({ ...s, coop: undefined }, { frame: 90, fps: 30, cost: 12, cards: { a: { cost: 9, ready: 0 } }, deployed: ['a'], slots: 7, summons: {}, costTimer: 10, costPeriod: 30,
     maxCost: 99, selected: 'b', life: 3, speed: 1, paused: true, coop: undefined, states: { result: undefined, down: false, offline: false }, stageStart: null });
-  assert.deepEqual(s.coop, { me: { life: 3, fast: true, revive: -1 }, mate: { life: 2, fast: false, revive: 1.5 }, speed: 1, paused: true, asking: -1, confirm: -1, task: null,
+  assert.deepEqual(s.coop, { me: { life: 3, fast: true, revive: -1 }, mate: { life: 2, fast: false, revive: 1.5 },
+    sides: [{ life: 3, fast: true, revive: -1 }, { life: 2, fast: false, revive: 1.5 }], score: undefined, speed: 1, paused: true, asking: -1, confirm: -1, task: null,
     cost: { state: 'forbid', amount: 15, share: 0, wait: 0 } }, 'the mate down: no cost request');
   const alone = hudState({ view: { ...view, players: [view.players[0]] }, status, control: null, seat: 0, options: { costIncreaseTime: 2, maxCost: 10 }, selected: null });
   assert.equal(alone.coop, undefined);
   assert.equal(alone.costPeriod, 60);
+});
+
+test('2v2 的比分：两队剩余生命合计，两人局没有（顶栏那条比分组保持隐藏）', () => {
+  const ps = (/** @type {number} */ revive) => ({ costTimer: 10, deployed: [], slots: 7, cards: {}, summons: {}, revive, ask: -1, askCd: 0 });
+  const view = { frame: 90, players: [{ life: 15, cost: 12 }, { life: 12, cost: 4 }, { life: 13, cost: 8 }, { life: 15, cost: 0 }], units: [] };
+  const status = /** @type {any} */ ({ players: [ps(-1), ps(-1), ps(-1), ps(-1)] });
+  const four = (/** @type {number} */ seat) => hudState({ view, status, control: null, seat, options: { costIncreaseTime: 1, maxCost: 99 }, selected: null }).coop;
+  // 偶席位（0/2）一队 28，奇席位（1/3）一队 27；站在哪一席，mine 就是哪一队
+  assert.deepEqual([0, 2, 1, 3].map((s) => four(s)?.score), [{ mine: 28, theirs: 27 }, { mine: 28, theirs: 27 }, { mine: 27, theirs: 28 }, { mine: 27, theirs: 28 }]);
+  // 两人局：不比，比分组不出现
+  const two = hudState({ view: { ...view, players: view.players.slice(0, 2) }, status, control: null, seat: 0, options: { costIncreaseTime: 1, maxCost: 99 }, selected: null }).coop;
+  assert.equal(two?.score, undefined);
+});
+
+test('the seats the top bar shows: me, then my partner, then the rest (a match of four pairs by parity)', () => {
+  assert.deepEqual(seatOrder(0, 2), [0, 1], 'a match of two: the other seat');
+  assert.deepEqual(seatOrder(1, 2), [1, 0]);
+  assert.deepEqual(seatOrder(0, 4), [0, 2, 1, 3], 'a match of four: me, the partner (same parity), then the two others');
+  assert.deepEqual(seatOrder(3, 4), [3, 1, 0, 2]);
+  assert.deepEqual(seatOrder(0, 1), [0], 'alone');
+  assert.equal(partnerOf(0, 4), 2);
+  assert.equal(partnerOf(1, 4), 3);
+  assert.equal(partnerOf(0, 1), -1);
 });
 
 test('the operator menu\'s skill: icon, charging, ready, running with the time left, stoppable; none without a skill', () => {

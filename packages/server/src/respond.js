@@ -81,10 +81,19 @@ export function sendBody(req, res, o) {
 /** Whether a response is worth compressing (站点-4): text, JSON, JavaScript, SVG of 1 KiB or more. @param {string} type @param {number} size */
 const compressible = (type, size) => size >= 1024 && /^(text\/|application\/(json|javascript)|image\/svg\+xml)/.test(type);
 
-/** The coding a request accepts, brotli before gzip; none. @param {import('node:http').IncomingMessage} req @returns {'br' | 'gzip' | null} */
+/**
+ * The coding a request accepts, brotli before gzip; none.
+ *
+ * `AUE_NO_BROTLI=1` drops brotli: some reverse proxies in front of a deployment strip
+ * `Content-Encoding: br` while passing the brotli body through, and a browser then renders the
+ * compressed bytes as text (measured 2026-10-26 on the ModelScope container: direct to the server
+ * the header is there, through ms.show it is gone and the 6741-byte body stays brotli).
+ * @param {import('node:http').IncomingMessage} req @returns {'br' | 'gzip' | null}
+ */
 function codingOf(req) {
   const a = String(req.headers['accept-encoding'] ?? '');
-  return /(^|[\s,])br([\s;,]|$)/.test(a) ? 'br' : /(^|[\s,])gzip([\s;,]|$)/.test(a) ? 'gzip' : null;
+  const br = process.env['AUE_NO_BROTLI'] !== '1' && /(^|[\s,])br([\s;,]|$)/.test(a);
+  return br ? 'br' : /(^|[\s,])gzip([\s;,]|$)/.test(a) ? 'gzip' : null;
 }
 
 /** Compressed bodies by coding and ETag, the oldest dropped past PACKED_MAX bytes. @type {Map<string, Promise<Buffer>>} */

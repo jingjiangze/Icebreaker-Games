@@ -15,11 +15,13 @@ import { startHttpServer } from './http.js';
 import { createMatchRoom } from './battle.js';
 import { createBattles } from './battles.js';
 import { createLobby } from './lobby.js';
+import { SEATS_MAX } from './rooms.js';
 import { projectViews, recruits } from './catalog.js';
 import { kitDir, nodeKits } from './kits.js';
 import { createGuard, guardUpgrades, countOption, LIMITS } from './guard.js';
 import { nodeOf } from './nodes.js';
 import { loadHostMods, modsDir } from './mods.js';
+import { createModManager, loadOwnerKey } from './modManager.js';
 
 /** @param {string[]} argv @returns {number} */
 export function parsePort(argv) {
@@ -39,9 +41,13 @@ const kitsDir = kitDir(rootDir), log = (/** @type {string} */ line) => console.l
 const trustProxy = args.includes('--trust-proxy'), guard = createGuard();
 console.log(kitsDir ? `kits: ${kitsDir}` : 'kits: none (operators fight on the engine’s own)');
 const kits = kitsDir ? { kits: (/** @type {string[]} */ ids) => nodeKits(kitsDir, ids) } : {};
-const mods = await loadHostMods(modsDir(rootDir, args, process.env));
+const hostModsDir = modsDir(rootDir, args, process.env);
+const mods = await loadHostMods(hostModsDir);
 for (const line of mods.lines) console.log(line);
-const content = { ...kits, source: mods.source };
+// the mod manager: reads need no key, writes take --mod-key / AUE_MOD_KEY / mods/.mod-key (created on first start)
+const modKey = loadOwnerKey({ rootDir, modsDir: hostModsDir, argv: args, env: process.env, log });
+const modManager = createModManager({ modsDir: hostModsDir, key: modKey, log, initial: mods });
+const content = { ...kits, getSource: () => modManager.current().source };
 
 /** @type {(req: import('node:http').IncomingMessage, socket: import('node:stream').Duplex, head: Buffer) => void} */
 let onUpgrade;
@@ -53,9 +59,11 @@ if (file) {
   if (node) console.log(`node ${node.digit} of ${Object.keys(node.peers).length}: room codes begin with ${node.digit}`);
   const lobby = createLobby({ projects: projectViews(), recruits: await recruits(), startMatch: (m, keys) => battles.start(m, keys), log, guard, trustProxy, node,
     startTraining: (m, key) => battles.start(m, [key], { absent: [1] }),
-    maxRooms: countOption(args, '--max-rooms', LIMITS.rooms) });
+    maxRooms: countOption(args, '--max-rooms', LIMITS.rooms),
+    // 房间座位数：默认 2（上游的合作人数），`--seats 4` 开四人房。上限见 rooms.js 的 SEATS_MAX。
+    seats: Math.max(1, Math.min(SEATS_MAX, countOption(args, '--seats', 2))) });
   onUpgrade = (req, socket, head) => { if (!lobby.upgrade(req, socket, head) && !battles.upgrade(req, socket, head)) socket.destroy(); };
 }
-const server = await startHttpServer({ rootDir, port: parsePort(args), host: option(args, '--host') ?? '127.0.0.1', onUpgrade: guardUpgrades(guard, trustProxy, onUpgrade), kitsDir, home: file ? 'play' : 'room', mods });
+const server = await startHttpServer({ rootDir, port: parsePort(args), host: option(args, '--host') ?? '127.0.0.1', onUpgrade: guardUpgrades(guard, trustProxy, onUpgrade), kitsDir, home: file ? 'play' : 'room', mods, modManager });
 const addr = server.address();
 if (addr !== null && typeof addr === 'object') console.log(`http://${addr.address}:${addr.port}/`);

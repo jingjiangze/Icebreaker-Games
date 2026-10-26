@@ -6,11 +6,13 @@ import { ACTIVITY, PROJECTS, STEP_MS, LINEUP, recruitEntries, STYLES, DEFAULT_ST
   DEFENCE_MODE, modeOf, stageName } from '../src/index.js';
 import { storyOf } from '../src/story.js';
 
-test('[房间-2] [房间-13] the projects: IG-1, IG-10 and IG-14 in 初级赛, IG-S-2 in 特级赛; 堡垒守御 IG-DF-1, IG-DF-4 (the same level, harder) and IG-S-5', () => {
+test('[房间-2] [房间-13] the projects: IG-1, IG-10, IG-14, IG-4 and IG-6 in 初级赛, IG-S-2 in 特级赛; 堡垒守御 IG-DF-1, IG-DF-4 (the same level, harder) and IG-S-5', () => {
   assert.deepEqual(PROJECTS.map((p) => [p.stage, p.mode, p.level, p.difficulty, p.className]), [
     // 高级赛's IG-EX stages play the 初级赛 levels at the harder difficulty
     ['act1multi_01', 'NORMAL', 'act1multi_01', 'NORMAL', '初级赛'], ['act1multi_06', 'NORMAL', 'act1multi_06', 'NORMAL', '初级赛'],
     ['act1multi_rm07', 'NORMAL', 'act1multi_rm07', 'NORMAL', '初级赛'],
+    // IG-4 / IG-6：关卡数据一直在磁盘上，原先没接进 LEVELS；敌人有未实现能力，走 TESTING 通道放行
+    ['act1multi_07', 'NORMAL', 'act1multi_07', 'NORMAL', '初级赛'], ['act1multi_rm05', 'NORMAL', 'act1multi_rm05', 'NORMAL', '初级赛'],
     ['act1multi_ex01', 'NORMAL', 'act1multi_01', 'FOUR_STAR', '高级赛'], ['act1multi_ex06', 'NORMAL', 'act1multi_06', 'FOUR_STAR', '高级赛'],
     ['act1multi_hard-02', 'NORMAL', 'act1multi_hard-02', 'NORMAL', '特级赛'],
     ['act1multi_fortress-rm01', 'DEFENCE', 'act1multi_fortress_rm01', 'NORMAL', '初级赛'], ['act1multi_fortress-ex-rm01', 'DEFENCE', 'act1multi_fortress_rm01', 'FOUR_STAR', '高级赛'],
