@@ -103,7 +103,7 @@ test('[房间-4] [房间-5] four seats: contested operators are picked in turns,
     g.rooms.message(seat + 1, { t: 'lineup', lineup: ids.map((id) => ({ id, skill: -1, module: -1 })) });
     assert.deepEqual(g.fails(seat + 1), [], `seat ${seat} lineup accepted (a contested operator picked from another seat's squad still fields)`);
   }
-  assert.deepEqual(g.last(1, 'room').lineups.map((l) => (l ? l.length : null)), [6, 6, 6, 6]);
+  assert.deepEqual(g.last(1, 'room').lineups.map((/** @type {any[] | null} */ l) => (l ? l.length : null)), [6, 6, 6, 6]);
 
   for (let i = 1; i <= 4; i++) g.rooms.message(i, { t: 'ready', on: true });
   await settle();
