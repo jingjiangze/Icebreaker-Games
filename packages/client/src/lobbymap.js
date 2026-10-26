@@ -110,7 +110,7 @@ export const pictureOf = (art, level) => (Object.hasOwn(PICTURES, level) ? art?.
 /**
  * The pick step as the player sees it (房间-4): its turn; whether it may hand the pick over; what is left; what each
  * side keeps.
- * @param {{ you: number, picking: { by: number, yielded: boolean, left: string[], won: string[][] } }} v
+ * @param {{ you: number, members?: readonly unknown[], picking: { by: number, yielded: boolean, left: string[], won: string[][] } }} v
  */
 export function pickView(v) {
   const p = v.picking, mine = p.by === v.you;

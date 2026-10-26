@@ -54,13 +54,10 @@ test('2v2 的比分：两队剩余生命合计，两人局没有（顶栏那条�
   const status = /** @type {any} */ ({ players: [ps(-1), ps(-1), ps(-1), ps(-1)] });
   const four = (/** @type {number} */ seat) => hudState({ view, status, control: null, seat, options: { costIncreaseTime: 1, maxCost: 99 }, selected: null }).coop;
   // 偶席位（0/2）一队 28，奇席位（1/3）一队 27；站在哪一席，mine 就是哪一队
-  assert.deepEqual(four(0).score, { mine: 28, theirs: 27 });
-  assert.deepEqual(four(2).score, { mine: 28, theirs: 27 });
-  assert.deepEqual(four(1).score, { mine: 27, theirs: 28 });
-  assert.deepEqual(four(3).score, { mine: 27, theirs: 28 });
+  assert.deepEqual([0, 2, 1, 3].map((s) => four(s)?.score), [{ mine: 28, theirs: 27 }, { mine: 28, theirs: 27 }, { mine: 27, theirs: 28 }, { mine: 27, theirs: 28 }]);
   // 两人局：不比，比分组不出现
   const two = hudState({ view: { ...view, players: view.players.slice(0, 2) }, status, control: null, seat: 0, options: { costIncreaseTime: 1, maxCost: 99 }, selected: null }).coop;
-  assert.equal(two.score, undefined);
+  assert.equal(two?.score, undefined);
 });
 
 test('the seats the top bar shows: me, then my partner, then the rest (a match of four pairs by parity)', () => {
