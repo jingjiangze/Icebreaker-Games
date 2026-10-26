@@ -241,7 +241,7 @@ index 038ca0e..2c13fca 100644
  
  /**
 diff --git a/packages/ui/src/battle/coop.js b/packages/ui/src/battle/coop.js
-index c5c6951..ed14600 100644
+index c5c6951..09495dd 100644
 --- a/packages/ui/src/battle/coop.js
 +++ b/packages/ui/src/battle/coop.js
 @@ -25,7 +25,7 @@ import { refNode } from '../node.js';
@@ -306,14 +306,15 @@ index c5c6951..ed14600 100644
        if (confirm) showConfirm(scr, root, c, confirm, s);
        first ||= s.task?.stage ?? 0;
        if (status && s.fortress) showFortress(scr, status, s.fortress, c.timerWarn ?? TIMER_WARN);
-@@ -236,6 +250,20 @@ function showFortress(scr, status, f, warn) {
+@@ -236,6 +250,21 @@ function showFortress(scr, status, f, warn) {
  /** @param {Screen} scr @param {UiNode} root @param {string} ref @param {() => void} fn */
  function tapHit(scr, root, ref, fn) { const n = refNode(root, ref); if (n) scr.tap('', fn, n); }
  
 +/**
 + * 2v2 的比分：两队剩余生命合计，夹在四席中间那条官方圆角底板上。只有四席才显示 —— 两人局（以及素材包
-+ * 没有这组节点的情形）一个像素都不动，保持原样式。@param {Screen} scr @param {UiNode} root
-+ * @param {Record<string, any>} c the pack's score refs @param {CoopState} s @param {UiNode} group
++ * 没有这组节点的情形）一个像素都不动，保持原样式。
++ * @param {Screen} scr @param {UiNode} root @param {Record<string, any>} c the pack's score refs
++ * @param {CoopState} s @param {UiNode} group
 + */
 +function showScore(scr, root, c, s, group) {
 +  const on = !!s.score && (s.sides?.length ?? 2) > 2;
