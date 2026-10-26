@@ -108,15 +108,39 @@ export function stageStartOf(s, stages, frame, o = { training: false, waves: 0 }
 }
 
 /**
+ * This seat's partner: the other seat in a match of two; in a match of four the other seat of the same parity (the
+ * same rule as the sim's `coop.partnerOf`, which pairs the ask/answer and the goal's holders).
+ * @param {number} seat @param {number} players
+ */
+export const partnerOf = (seat, players) => {
+  if (players === 2) return 1 - seat;
+  for (let s = 0; s < players; s++) if (s !== seat && s % 2 === seat % 2) return s;
+  return -1;
+};
+
+/**
+ * The seats the top bar shows, in the order it shows them: this seat first (the pack's `[my]`), then the partner, then
+ * whoever is left in seat order. The engine reads the pack's `[my]`/`[you]` as the first two, so a match of two gets
+ * exactly the two nodes the pack was drawn with.
+ * @param {number} seat @param {number} players
+ */
+export const seatOrder = (seat, players) => {
+  const partner = partnerOf(seat, players);
+  const rest = Array.from({ length: players }, (_, s) => s).filter((s) => s !== seat && s !== partner);
+  return [seat, ...(partner < 0 ? [] : [partner]), ...rest];
+};
+
+/**
  * The co-op top bar's and the cost request's state (界面-12, 界面-15–17), 堡垒守御's (界面-39).
  * @param {{ view: import('@aue/schema').View, status: Status, control: Control | null, seat: number, options: any, stages?: any[], waves?: number, requests?: Requests }} o
  * @param {number} speed @param {boolean} paused
  */
 function coopState(o, speed, paused) {
   const side = (/** @type {number} */ i) => ({ life: o.view.players[i].life, fast: o.control?.fast[i] === 1, revive: o.status.players[i].revive >= 0 ? o.status.players[i].revive / FPS : -1 });
-  const r = o.requests, c = o.control, mate = 1 - o.seat;
+  const r = o.requests, c = o.control, order = seatOrder(o.seat, o.view.players.length), mate = order[1] ?? -1;
   const left = r && r.pauseSince >= 0 ? Math.max(0, 1 - (r.now - r.pauseSince) / (OPEN * 1000)) : 0;
-  return { me: side(o.seat), mate: side(mate), speed, paused, asking: c?.asker === o.seat && r ? left : -1, confirm: c?.asker === mate && r ? left : -1,
+  return { me: side(o.seat), mate: side(Math.max(0, mate)), sides: order.map(side), speed, paused,
+    asking: c?.asker === o.seat && r ? left : -1, confirm: c?.asker === mate && r ? left : -1,
     task: taskOf(o.status, o.stages ?? [], o.view.frame), cost: costAsk(costInput(o)), ...fortressOf(o.status, o.waves ?? 0, o.view.frame, o.seat) };
 }
 

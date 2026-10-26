@@ -10,10 +10,13 @@
 
 ## patch 里的三处改动
 
-1. `packages/render/src/renderer.js` — 战场背景：纯灰 `0x404040` → 垂直渐变 + 远处雾化（`skyBackdrop` / `applySky` / `SKY_FOG_*`）
+1. `packages/render/src/renderer.js` — 战场背景：纯灰 `0x404040` → 垂直渐变 + 远处雾化（`skyBackdrop` / `applySky` / `SKY_FOG_*`），
+   并新增 `backdrop` 选项：给了官方场景图就用它（`SKY_BACKDROP_INTENSITY = 0.16` 压暗），没给仍退回渐变
 2. `packages/sim/src/coop.js` — `goalSeats` 支持四座位（一侧由同奇偶两座共守）、新增 `partnerOf`、
    `askProblem` / `answerCost` 用伙伴座位而非 `1 - seat`
 3. `packages/net/src/host.js` — `frameCommands` 去掉 `seats !== 2` 早退与写死的 `[0, 1]`
+4. `packages/ui/src/battle/coop.js` — 顶栏从「我 + 队友」泛化到 N 席：`SEAT_TAGS` / `seatRef`，
+   `CoopState.sides` 逐席 `showSide`；两人局的节点与行为不变
 
 ## 怎么用
 

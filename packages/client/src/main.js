@@ -249,7 +249,7 @@ async function openEarlyUi(stage) {
 function originalUi(match, content, avatar, opened) {
   const { ui, loaded, start } = opened, base = new URL('ui/', ASSETS).href;
   const deck = deckCards(match, content, seat, avatar, ROSTER);
-  const hud = createBattleHud(ui, { deck, coop: (match.decks?.length ?? 1) === 2, start });
+  const hud = createBattleHud(ui, { deck, coop: (match.decks?.length ?? 1) > 1, start });
   opened.stop();
   document.body.classList.add('original-ui');
   return { ui, hud, deck, icons: loaded.icons, iconBase: new URL('skills/', base).href };

@@ -181,3 +181,62 @@ index 038ca0e..8f96737 100644
  }
  
  /**
+diff --git a/packages/ui/src/battle/coop.js b/packages/ui/src/battle/coop.js
+index c5c6951..b3f20a3 100644
+--- a/packages/ui/src/battle/coop.js
++++ b/packages/ui/src/battle/coop.js
+@@ -25,7 +25,7 @@ import { refNode } from '../node.js';
+  * left of this seat's pause request and of the mate's (−1 for none), the stage's task (none before the first), or
+  * 堡垒守御's wave and the rest panel's state (界面-39).
+  * @typedef {{ me: Side, mate: Side, speed: number, paused: boolean, asking: number, confirm?: number, task?: Task | null, fortress?: FortressTask | null,
+- *   resting?: import('./resting.js').Resting | null }} CoopState
++ *   resting?: import('./resting.js').Resting | null, sides?: Side[] }} CoopState
+  */
+ 
+ /** The objectives the task panel has a line for. */
+@@ -42,6 +42,17 @@ export const coopSpeedSprite = (sp, speed) => (speed >= 2 ? sp.x2 : sp.x1);
+ /** A side's countdown text: whole seconds, rounded up. @param {number} s */
+ export const reviveText = (s) => String(Math.max(0, Math.ceil(s)));
+ 
++/** The pack's seat tags, in the order a seat list is shown: this seat, then the others. A 4-player pack has all four. */
++export const SEAT_TAGS = Object.freeze(['[my]', '[you]', '[mate2]', '[mate3]']);
++
++/**
++ * A ref of this seat's node, rewritten for another seat in the list: `[my]` stays, the rest take the pack's tags.
++ * Seats past the tags the pack has give their own `[my]`-less ref, which finds nothing and shows nothing.
++ * @param {string} ref @param {number} i
++ */
++export const seatRef = (ref, i) => (i === 0 ? ref : ref.replace('[my]', SEAT_TAGS[i] ?? '[you]'));
++
++
+ /**
+  * The co-op top bar on a UI; `update` shows a frame's state; taps on speed and pause call the handlers, and the answer
+  * to the mate's pause request `on.confirm(accept)`.
+@@ -52,7 +63,7 @@ export function createCoopTop(ui, c, on) {
+   const scr = ui.open('coop.topbar'), root = scr.root, status = refNode(root, c.status.panel);
+   scr.show('btn_menu', false);
+   if (status) status.active = true;
+-  for (const ref of [c.status.lifeLost, c.status.lifeLost?.replace('[my]', '[you]'), c.lag?.back]) { const n = refNode(root, ref); if (n) n.active = false; }
++  for (const ref of [...SEAT_TAGS.map((t) => c.status.lifeLost?.replace('[my]', t)), c.lag?.back]) { const n = refNode(root, ref); if (n) n.active = false; }
+   scr.show('text_battle_end_time', false);
+   for (const n of ['fortress', 'fortress_lastWave', 'slider_progress_outer']) scr.show(n, false);
+   const confirm = refNode(root, c.pauseConfirm);
+@@ -60,7 +71,6 @@ export function createCoopTop(ui, c, on) {
+     scr.tap('btn_confirm', () => on.confirm?.(true), confirm);
+     scr.tap('btn_cancel/hotspot', () => on.confirm?.(false), confirm);
+   }
+-  const mateRef = (/** @type {string} */ ref) => ref.replace('[my]', '[you]');
+   tapHit(scr, root, '@btn_speed_level/btn_speed_level_icon/hotspot', on.speed);
+   tapHit(scr, root, `${c.pause}/collider`, on.pause);
+   /** @type {CoopState | null} the state shown last */
+@@ -69,8 +79,8 @@ export function createCoopTop(ui, c, on) {
+     screen: scr,
+     /** @param {CoopState} s */
+     update(s) {
+-      showSide(scr, root, c.status.life, s.me);
+-      showSide(scr, root, mateRef(c.status.life), s.mate);
++      const sides = s.sides ?? [s.me, s.mate];
++      sides.forEach((side, i) => showSide(scr, root, seatRef(c.status.life, i), side));
+       if (was) sideEntries(scr, root, c.enter, was, s);
+       showSpeed(scr, root, c.speed, s, was);
+       showPause(scr, root, c, s);
