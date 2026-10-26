@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { KIND, SKILL_STATE, STATUS_BIT } from '@aue/schema';
-import { deckCards, battleSpeed, hudState, menuSkill, ownUnitAt, requestsAfter, taskOf, costInput, unitBars, stageStartOf, fortressOf } from '../src/battlehud.js';
+import { deckCards, battleSpeed, hudState, menuSkill, ownUnitAt, requestsAfter, taskOf, costInput, unitBars, stageStartOf, fortressOf, partnerOf, seatOrder } from '../src/battlehud.js';
 
 /** A view unit. @param {Record<string, number>} v @returns {import('@aue/schema').ViewUnit} */
 const unit = (v) => ({ id: 1, kind: KIND.OPERATOR, owner: 0, x: 2, y: 3, z: 0, dir: 0, hp: 10, maxHp: 10, anim: 0, sp: 5, spCost: 20, skill: SKILL_STATE.CHARGING, skillLeft: -1, status: 0, element: 0, ep: 1, burst: 0, ...v });
@@ -40,11 +40,23 @@ test('the HUD\'s state of a frame: the deck, the cost and its next point, lives,
   const s = hudState({ view, status, control: { fast: [1, 0], held: 1, asker: -1, resuming: 0 }, seat: 0, options: { costIncreaseTime: 1, maxCost: 99 }, selected: 'b' });
   assert.deepEqual({ ...s, coop: undefined }, { frame: 90, fps: 30, cost: 12, cards: { a: { cost: 9, ready: 0 } }, deployed: ['a'], slots: 7, summons: {}, costTimer: 10, costPeriod: 30,
     maxCost: 99, selected: 'b', life: 3, speed: 1, paused: true, coop: undefined, states: { result: undefined, down: false, offline: false }, stageStart: null });
-  assert.deepEqual(s.coop, { me: { life: 3, fast: true, revive: -1 }, mate: { life: 2, fast: false, revive: 1.5 }, speed: 1, paused: true, asking: -1, confirm: -1, task: null,
+  assert.deepEqual(s.coop, { me: { life: 3, fast: true, revive: -1 }, mate: { life: 2, fast: false, revive: 1.5 },
+    sides: [{ life: 3, fast: true, revive: -1 }, { life: 2, fast: false, revive: 1.5 }], speed: 1, paused: true, asking: -1, confirm: -1, task: null,
     cost: { state: 'forbid', amount: 15, share: 0, wait: 0 } }, 'the mate down: no cost request');
   const alone = hudState({ view: { ...view, players: [view.players[0]] }, status, control: null, seat: 0, options: { costIncreaseTime: 2, maxCost: 10 }, selected: null });
   assert.equal(alone.coop, undefined);
   assert.equal(alone.costPeriod, 60);
+});
+
+test('the seats the top bar shows: me, then my partner, then the rest (a match of four pairs by parity)', () => {
+  assert.deepEqual(seatOrder(0, 2), [0, 1], 'a match of two: the other seat');
+  assert.deepEqual(seatOrder(1, 2), [1, 0]);
+  assert.deepEqual(seatOrder(0, 4), [0, 2, 1, 3], 'a match of four: me, the partner (same parity), then the two others');
+  assert.deepEqual(seatOrder(3, 4), [3, 1, 0, 2]);
+  assert.deepEqual(seatOrder(0, 1), [0], 'alone');
+  assert.equal(partnerOf(0, 4), 2);
+  assert.equal(partnerOf(1, 4), 3);
+  assert.equal(partnerOf(0, 1), -1);
 });
 
 test('the operator menu\'s skill: icon, charging, ready, running with the time left, stoppable; none without a skill', () => {
