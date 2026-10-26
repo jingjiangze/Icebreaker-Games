@@ -30,6 +30,18 @@ jobs:
         with:
           submodules: true
 
+      # 我方对 engine 的改动在 patches/ 里（没有上游写权限，engine 是只读 submodule）。CI 必须先打上，
+      # 否则测的是纯净上游：client 引用的 RendererOptions.backdrop、CoopState.sides 等会报 TS2353/TS2339。
+      # 打不上就是 patch 与固定提交 c8af98d 脱节，直接红——这正是要暴露的。
+      - name: Apply engine patches
+        shell: bash
+        run: |
+          for p in patches/*.patch; do
+            echo "applying $p"
+            git -C engine apply --whitespace=nowarn "$GITHUB_WORKSPACE/$p"
+          done
+          git -C engine diff --stat
+
       # the pnpm version comes from package.json "packageManager"
       - uses: pnpm/action-setup@v6
 
@@ -57,6 +69,14 @@ jobs:
       - uses: actions/checkout@v7
         with:
           submodules: true
+
+      - name: Apply engine patches
+        shell: bash
+        run: |
+          for p in patches/*.patch; do
+            echo "applying $p"
+            git -C engine apply --whitespace=nowarn "$GITHUB_WORKSPACE/$p"
+          done
 
       - uses: pnpm/action-setup@v6
 
