@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { pageOf, stepOf, countdownOf, bannerOf, stagePanel, ownerStatus, pictureOf, pickView, lineupOptions, resultOf, newLocal, STEP_SCREENS, LINEUP_VIEWS } from '../src/lobbymap.js';
 import { pickOf } from '../src/lobbysound.js';
-import { pingText } from '../src/roomtext.js';
+import { pingText, partnerOf } from '../src/roomtext.js';
 
 test('[页面-6] the latency text: the colour of the highest threshold at or under it, in whole ms, at least 1', () => {
   assert.equal(pingText(0.2), '当前延迟<color=#7fa826>1</color>ms');
@@ -111,4 +111,11 @@ test('[房间-13] a 堡垒守御 result: its difficulty, the stamps of the waves
   const raw = JSON.stringify({ match: 'm', result: 1, level: 'act1multi_fortress_rm01', difficulty: 'FOUR_STAR', stamps: [2], fortress: { defended: 5, damage: 123456 }, at: 9 });
   assert.deepEqual(resultOf(raw), { match: 'm', result: 1, level: 'act1multi_fortress_rm01', difficulty: 'FOUR_STAR', stamps: [2], fortress: { defended: 5, damage: 123456 }, at: 9 });
   assert.equal(resultOf(JSON.stringify({ match: 'm', result: 0, level: 'x', stamps: [], fortress: { damage: 1 } }))?.fortress, undefined, 'no waves: none');
+});
+
+test('[房间-1] 我的搭档：两座局是另一位，四座局是同奇偶那一席（与引擎 coop.partnerOf 同一条规则）', () => {
+  assert.deepEqual([partnerOf(0, 2), partnerOf(1, 2)], [1, 0], '两座：互为搭档');
+  assert.deepEqual([partnerOf(0, 4), partnerOf(1, 4), partnerOf(2, 4), partnerOf(3, 4)], [2, 3, 0, 1], '四座：0/2 一队、1/3 一队');
+  assert.deepEqual([partnerOf(0, 3), partnerOf(1, 3), partnerOf(2, 3)], [2, -1, 0], '三座：奇席位落单，没有搭档');
+  assert.equal(partnerOf(0, 1), -1, '一个人：没有搭档');
 });

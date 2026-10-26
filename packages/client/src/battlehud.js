@@ -83,7 +83,7 @@ export function hudState(o) {
     frame: view.frame, fps: FPS, cost: p.cost, cards: ps.cards, deployed: ps.deployed, slots: ps.slots, summons: ps.summons,
     ...(f ? { counts: f.pools[seat] ?? {}, building: f.phase === 'rest' } : {}),
     costTimer: ps.costTimer, costPeriod: secondsToFrames(o.options.costIncreaseTime), maxCost: o.options.maxCost, selected: o.selected,
-    life: p.life, speed, paused, coop: view.players.length === 2 ? coopState(o, speed, paused) : undefined,
+    life: p.life, speed, paused, coop: view.players.length > 1 ? coopState(o, speed, paused) : undefined,
     states: { result: status.result, down: ps.revive >= 0, offline: !!o.offline },
     stageStart: stageStartOf(status, o.stages ?? [], view.frame, { training: !!o.training, waves: o.waves ?? 0 }),
   };
@@ -137,11 +137,26 @@ export const seatOrder = (seat, players) => {
  */
 function coopState(o, speed, paused) {
   const side = (/** @type {number} */ i) => ({ life: o.view.players[i].life, fast: o.control?.fast[i] === 1, revive: o.status.players[i].revive >= 0 ? o.status.players[i].revive / FPS : -1 });
-  const r = o.requests, c = o.control, order = seatOrder(o.seat, o.view.players.length), mate = order[1] ?? -1;
+  const r = o.requests, c = o.control, players = o.view.players.length, order = seatOrder(o.seat, players), mate = order[1] ?? -1;
   const left = r && r.pauseSince >= 0 ? Math.max(0, 1 - (r.now - r.pauseSince) / (OPEN * 1000)) : 0;
-  return { me: side(o.seat), mate: side(Math.max(0, mate)), sides: order.map(side), speed, paused,
+  return { me: side(o.seat), mate: side(Math.max(0, mate)), sides: order.map(side), score: teamScore(o.view, players, o.seat), speed, paused,
     asking: c?.asker === o.seat && r ? left : -1, confirm: c?.asker === mate && r ? left : -1,
     task: taskOf(o.status, o.stages ?? [], o.view.frame), cost: costAsk(costInput(o)), ...fortressOf(o.status, o.waves ?? 0, o.view.frame, o.seat) };
+}
+
+/**
+ * 2v2 的比分（顶栏中央那一条）：两队的**剩余生命合计**。四人局按奇偶分队（0/2 与 1/3，与 sim 的
+ * `goalSeats`、`partnerOf` 同一条规则），所以 my / partner 是同一队、另外两席是对面那队。两人局返回
+ * undefined —— 顶栏的比分组压根不显示，保持原样式。每席的 `life` 是独立的（sim `loseLife`），合计就是
+ * 这一队还剩多少条命，也是目前 view 里唯一能按队拆的指标（每队击杀数引擎还没有）。
+ * @param {import('@aue/schema').View} view @param {number} players @param {number} seat 我这一席（决定哪队算 mine）
+ * @returns {{ mine: number, theirs: number } | undefined}
+ */
+function teamScore(view, players, seat) {
+  if (players <= 2) return undefined;
+  let even = 0, odd = 0;
+  for (let i = 0; i < players; i++) { const life = view.players[i].life; if (i % 2 === 0) even += life; else odd += life; }
+  return seat % 2 === 0 ? { mine: even, theirs: odd } : { mine: odd, theirs: even };
 }
 
 /**
@@ -181,7 +196,7 @@ export function taskOf(s, stages, frame) {
  * @returns {import('@aue/ui').CostAskInput}
  */
 export function costInput(o) {
-  const mate = 1 - o.seat, me = o.status.players[o.seat], them = o.status.players[mate], max = o.options.maxCost, cap = o.options.costTransfer ?? TRANSFER;
+  const mate = partnerOf(o.seat, o.view.players.length), me = o.status.players[o.seat], them = o.status.players[mate], max = o.options.maxCost, cap = o.options.costTransfer ?? TRANSFER;
   const mine = o.view.players[o.seat], theirs = o.view.players[mate], a = o.requests?.answer ?? null;
   const canAsk = me.revive < 0 && them.revive < 0 && mine.cost < max && me.ask < 0 && them.ask < 0 && me.askCd <= 0;
   return { mine: me.ask, mates: them.ask, cooldown: me.askCd, canAsk, cap, give: Math.max(0, Math.min(cap, mine.cost, max - theirs.cost)),

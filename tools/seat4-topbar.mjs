@@ -40,6 +40,29 @@ function seat(src, tag, x, tint) {
   return cp;
 }
 
+/** 比分节点名，也是 `hud.coopTop.score` 那三个 ref 的最后一段。 */
+const SCORE = 'score';
+/** 比分的横向中心：四席之间那段空档的正中。 */
+const SCORE_CENTER = 38;
+/** 与生命数字同一行。 */
+const SCORE_Y = 18;
+/** 底板宽度：空档约 322，两端各留一点呼吸。 */
+const SCORE_W = 250;
+
+/** 一个节点的最小 rt（四个数字都是相对父节点的像素）。 @param {number} x @param {number} y @param {number} w @param {number} h */
+const rect = (x, y, w, h) => ({ amin: [0.5, 0.5], amax: [0.5, 0.5], pos: [x, y], size: [w, h], pivot: [0.5, 0.5], scale: [1, 1], rotz: 0 });
+
+/**
+ * 一个数字节点：官方字体 Novecentowide-Bold、居中、与生命数字同级字号，颜色取官方双色。
+ * @param {string} name @param {number} x @param {number} size @param {number[]} color @param {string} [text]
+ */
+function num(name, x, size, color, text = '0') {
+  return {
+    name, active: true, children: [], rt: rect(x, SCORE_Y, 96, 60),
+    comps: { text: { text, size, style: 0, align: 4, line: 1, best: 0, min: 0, max: 40, rich: 0, hwrap: 1, color, font: 'Novecentowide-Bold' } },
+  };
+}
+
 const [, , inFile, outFile] = process.argv;
 if (!inFile || !outFile) {
   console.error('usage: node tools/seat4-topbar.mjs <in battle.json> <out battle.json>');
@@ -60,7 +83,7 @@ const SEATS = [
 ];
 
 /** 删掉上一次生成的节点，保证重跑幂等。 */
-panel.children = panel.children.filter((c) => !/^\[mate[23]\]/.test(c.name));
+panel.children = panel.children.filter((c) => !/^\[mate[23]\]/.test(c.name) && c.name !== SCORE);
 
 for (const [tag, x, tint, like] of SEATS) {
   const src = (/** @type {string} */ n) => panel.children.find((c) => c.name === `[${like}]${n}`);
@@ -77,6 +100,26 @@ for (const [tag, x, tint, like] of SEATS) {
   added[2].active = false;
   panel.children.push(...added);
 }
+
+// ── 2v2 的比分 ────────────────────────────────────────────────────────────────────────────────────────
+// 四席之间剩下的空档：`[mate2]` 的右缘（-122.3）到 `[mate3]` 的左缘（119.8）之间，中心约 x=+38。
+// 官方没有比分/数字图集素材（sprites 里搜 score/versus/0-9 全是倍速与稀有度图标），所以这里只用官方两样东西：
+// 底板 `actmultiV3_sprite_battle_round_rectangle`（text_lag 用的那条圆角条）+ 官方字体与官方双色（我=蓝、对方=绿）。
+// 两席（1v1）时整组 `active:false`，原样式一个像素不动。
+panel.children.push({
+  name: SCORE, active: false, comps: {}, children: [
+    { name: 'plate', active: true, children: [], rt: rect(SCORE_CENTER, SCORE_Y, SCORE_W, 46),
+      comps: { img: { kind: 'image', ref: 'sprite/actmultiV3_sprite_battle_round_rectangle', color: [0.2275, 0.2275, 0.2275, 0.6],
+        type: 1, fill: 1, fillMethod: 4, fillOrigin: 0, clockwise: 1, preserve: 0, center: 1, border: [20, 0, 20, 0] } } },
+    num('mine', SCORE_CENTER - 56, 34, MY_TINT),
+    num('sep', SCORE_CENTER, 30, [1, 1, 1, 0.75], ':'),
+    num('theirs', SCORE_CENTER + 56, 34, YOU_TINT),
+  ],
+  rt: rect(0, 0, 0, 0),
+});
+
+/** 引擎侧靠这几个 ref 找比分，和 `status` / `speed` 放在一起。 */
+pack.hud.coopTop.score = { panel: `@${PANEL}/${SCORE}`, mine: `@${PANEL}/${SCORE}/mine`, theirs: `@${PANEL}/${SCORE}/theirs` };
 
 fs.writeFileSync(outFile, JSON.stringify(pack));
 console.log(`seat4-topbar: ${panel.children.length} children -> ${outFile}`);
